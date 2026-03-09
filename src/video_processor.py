@@ -11,6 +11,19 @@ except ImportError:
     from lane import detect_lanes
 
 
+def _extract_vehicle_boxes(results, model_names, confidence_threshold, target_classes):
+    """Return list of (x1, y1, x2, y2) for all detected vehicles above threshold."""
+    boxes = []
+    for result in results:
+        for box in result.boxes:
+            conf = float(box.conf[0])
+            cls  = model_names[int(box.cls[0])].lower()
+            if cls in target_classes and conf >= confidence_threshold:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                boxes.append((x1, y1, x2, y2))
+    return boxes
+
+
 def process_video(
     model_path: str,
     video_path: str,
@@ -57,9 +70,16 @@ def process_video(
             break
 
         resized = cv2.resize(frame, (frame_width, frame_height))
-        lane_frame = detect_lanes(resized)
 
+        # Run YOLO first so we have vehicle boxes for lane clipping
         results = model(resized, verbose=False)
+        vehicle_boxes = _extract_vehicle_boxes(
+            results, model.names, car_confidence_threshold, target_classes
+        )
+
+        # Pass vehicle boxes so lane polygon stops at the nearest vehicle
+        lane_frame = detect_lanes(resized, vehicle_boxes=vehicle_boxes)
+
         output = draw_car_detections(
             lane_frame,
             results,

@@ -6,9 +6,10 @@ from typing import Any
 
 import requests
 
-
-PINATA_API_BASE = "https://api.pinata.cloud"
-PINATA_JWT_ENV = "PINATA_JWT"
+PINATA_API_BASE    = "https://api.pinata.cloud"
+PINATA_UPLOAD_BASE = "https://uploads.pinata.cloud"
+PINATA_JWT_ENV     = "PINATA_JWT"
+PINATA_GATEWAY     = "https://gateway.pinata.cloud/ipfs"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class PinataClient:
         self,
         jwt_token: str | None = None,
         api_base: str = PINATA_API_BASE,
+        upload_base: str = PINATA_UPLOAD_BASE,
         env_var: str = PINATA_JWT_ENV,
     ) -> None:
         token = jwt_token or os.getenv(env_var)
@@ -31,90 +33,79 @@ class PinataClient:
             raise ValueError(
                 f"Pinata JWT token is required. Pass jwt_token or set {env_var}."
             )
-        self.api_base = api_base.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {token}"}
+        self.api_base    = api_base.rstrip("/")
+        self.upload_base = upload_base.rstrip("/")
+        self._headers    = {"Authorization": f"Bearer {token}"}
 
-    def upload_file(
+    # ── Groups (v3) ────────────────────────────────────────────────────────────
+
+    def create_group(self, name: str) -> str:
+        """Create a Pinata group and return its ID."""
+        url  = f"{self.api_base}/v3/groups"
+        resp = requests.post(
+            url,
+            headers={**self._headers, "Content-Type": "application/json"},
+            json={"name": name},
+            timeout=30,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"Pinata create_group failed ({resp.status_code}): {resp.text}"
+            )
+        return resp.json()["data"]["id"]
+
+    def list_group_files(self, group_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Return all files belonging to a Pinata group (v3)."""
+        url    = f"{self.api_base}/v3/files"
+        params = {"group": group_id, "limit": limit}
+        resp   = requests.get(url, headers=self._headers, params=params, timeout=30)
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"Pinata list_group_files failed ({resp.status_code}): {resp.text}"
+            )
+        return resp.json()["data"]["files"]
+
+    # ── Upload (v3) ────────────────────────────────────────────────────────────
+
+    def upload_clip(
         self,
         file_path: str | Path,
         *,
         name: str | None = None,
+        group_id: str | None = None,
         keyvalues: dict[str, str] | None = None,
-        cid_version: int = 1,
         timeout_s: int = 120,
     ) -> PinataUploadResult:
+        """Upload a file via the v3 Files API, optionally into a group."""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
 
-        metadata = {"name": name or path.name}
+        form: dict[str, Any] = {"name": name or path.name}
+        if group_id:
+            form["group_id"] = group_id
         if keyvalues:
-            metadata["keyvalues"] = keyvalues
+            form["keyvalues"] = json.dumps(keyvalues)
 
-        options = {"cidVersion": cid_version}
-        url = f"{self.api_base}/pinning/pinFileToIPFS"
-
-        with path.open("rb") as file_handle:
-            files = {"file": (path.name, file_handle)}
-            data = {
-                "pinataMetadata": json.dumps(metadata),
-                "pinataOptions": json.dumps(options),
-            }
+        url = f"{self.upload_base}/v3/files"
+        with path.open("rb") as fh:
             response = requests.post(
                 url,
                 headers=self._headers,
-                files=files,
-                data=data,
+                files={"file": (path.name, fh, "video/mp4")},
+                data=form,
                 timeout=timeout_s,
             )
 
         if response.status_code >= 400:
             raise RuntimeError(
-                f"Pinata file upload failed ({response.status_code}): {response.text}"
+                f"Pinata upload failed ({response.status_code}): {response.text}"
             )
 
-        payload = response.json()
+        data = response.json()["data"]
         return PinataUploadResult(
-            ipfs_cid=payload["IpfsHash"],
-            size_bytes=int(payload.get("PinSize", 0)),
-            timestamp=str(payload.get("Timestamp", "")),
-            raw_response=payload,
-        )
-
-    def upload_json(
-        self,
-        content: dict[str, Any],
-        *,
-        name: str = "incident-metadata",
-        keyvalues: dict[str, str] | None = None,
-        cid_version: int = 1,
-        timeout_s: int = 60,
-    ) -> PinataUploadResult:
-        url = f"{self.api_base}/pinning/pinJSONToIPFS"
-        body: dict[str, Any] = {
-            "pinataOptions": {"cidVersion": cid_version},
-            "pinataMetadata": {"name": name},
-            "pinataContent": content,
-        }
-        if keyvalues:
-            body["pinataMetadata"]["keyvalues"] = keyvalues
-
-        response = requests.post(
-            url,
-            headers={**self._headers, "Content-Type": "application/json"},
-            data=json.dumps(body),
-            timeout=timeout_s,
-        )
-
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"Pinata JSON upload failed ({response.status_code}): {response.text}"
-            )
-
-        payload = response.json()
-        return PinataUploadResult(
-            ipfs_cid=payload["IpfsHash"],
-            size_bytes=int(payload.get("PinSize", 0)),
-            timestamp=str(payload.get("Timestamp", "")),
-            raw_response=payload,
+            ipfs_cid=data["cid"],
+            size_bytes=int(data.get("size", 0)),
+            timestamp=str(data.get("created_at", "")),
+            raw_response=data,
         )

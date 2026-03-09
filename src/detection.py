@@ -140,6 +140,7 @@ def draw_car_detections(
     frame_dt_s: float,
     near_miss_monitor: NearMissMonitor,
     target_vehicle_classes: set[str],
+    alert_sink: list | None = None,
 ) -> np.ndarray:
     near_miss_monitor.begin_frame()
 
@@ -221,5 +222,16 @@ def draw_car_detections(
                     (0, 0, 255),
                     2,
                 )
+                if alert_sink is not None:
+                    import time as _time
+                    import math as _math
+                    alert_sink.append({
+                        "occurred_at":   int(_time.time()),
+                        "vehicle_class": class_name,
+                        "distance_m":    distance_m,
+                        "ttc_s":         ttc_s if _math.isfinite(ttc_s) else 0.0,
+                        "severity_score":  score,
+                        "severity_label":  severity,
+                    })
 
     return frame

@@ -13,7 +13,6 @@ class IncidentPayload:
     severity_label: str
     alert_flag: bool
     clip_cid: str
-    snapshot_cid: str = ""
 
     def to_contract_args(self) -> tuple:
         camera_hash = hashlib.sha256(self.camera_id.encode("utf-8")).hexdigest()
@@ -33,6 +32,4 @@ class IncidentPayload:
             self.severity_label,
             bool(self.alert_flag),
             self.clip_cid,
-            self.snapshot_cid,
         )
-

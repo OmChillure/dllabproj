@@ -1,0 +1,10 @@
+ultralytics
+opencv-python
+flask
+streamlit
+requests
+numpy
+anchorpy
+solana
+solders
+python-dotenv
