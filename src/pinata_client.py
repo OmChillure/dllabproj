@@ -9,7 +9,8 @@ import requests
 PINATA_API_BASE    = "https://api.pinata.cloud"
 PINATA_UPLOAD_BASE = "https://uploads.pinata.cloud"
 PINATA_JWT_ENV     = "PINATA_JWT"
-PINATA_GATEWAY     = "https://gateway.pinata.cloud/ipfs"
+PINATA_NETWORK     = "public"
+PUBLIC_GATEWAY     = "https://gateway.pinata.cloud/ipfs"
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class PinataClient:
         api_base: str = PINATA_API_BASE,
         upload_base: str = PINATA_UPLOAD_BASE,
         env_var: str = PINATA_JWT_ENV,
+        network: str = PINATA_NETWORK,
     ) -> None:
         token = jwt_token or os.getenv(env_var)
         if not token:
@@ -35,35 +37,8 @@ class PinataClient:
             )
         self.api_base    = api_base.rstrip("/")
         self.upload_base = upload_base.rstrip("/")
+        self.network     = network
         self._headers    = {"Authorization": f"Bearer {token}"}
-
-    # ── Groups (v3) ────────────────────────────────────────────────────────────
-
-    def create_group(self, name: str) -> str:
-        """Create a Pinata group and return its ID."""
-        url  = f"{self.api_base}/v3/groups"
-        resp = requests.post(
-            url,
-            headers={**self._headers, "Content-Type": "application/json"},
-            json={"name": name},
-            timeout=30,
-        )
-        if resp.status_code >= 400:
-            raise RuntimeError(
-                f"Pinata create_group failed ({resp.status_code}): {resp.text}"
-            )
-        return resp.json()["data"]["id"]
-
-    def list_group_files(self, group_id: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Return all files belonging to a Pinata group (v3)."""
-        url    = f"{self.api_base}/v3/files"
-        params = {"group": group_id, "limit": limit}
-        resp   = requests.get(url, headers=self._headers, params=params, timeout=30)
-        if resp.status_code >= 400:
-            raise RuntimeError(
-                f"Pinata list_group_files failed ({resp.status_code}): {resp.text}"
-            )
-        return resp.json()["data"]["files"]
 
     # ── Upload (v3) ────────────────────────────────────────────────────────────
 
@@ -72,28 +47,27 @@ class PinataClient:
         file_path: str | Path,
         *,
         name: str | None = None,
-        group_id: str | None = None,
         keyvalues: dict[str, str] | None = None,
         timeout_s: int = 120,
     ) -> PinataUploadResult:
-        """Upload a file via the v3 Files API, optionally into a group."""
+        """Upload a clip to Pinata IPFS with optional keyvalues metadata."""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
 
-        form: dict[str, Any] = {"name": name or path.name}
-        if group_id:
-            form["group_id"] = group_id
+        payload = {
+            "network": self.network,
+            "name":    name or path.name,
+        }
         if keyvalues:
-            form["keyvalues"] = json.dumps(keyvalues)
+            payload["keyvalues"] = json.dumps(keyvalues)
 
-        url = f"{self.upload_base}/v3/files"
         with path.open("rb") as fh:
             response = requests.post(
-                url,
+                f"{self.upload_base}/v3/files",
                 headers=self._headers,
+                data=payload,
                 files={"file": (path.name, fh, "video/mp4")},
-                data=form,
                 timeout=timeout_s,
             )
 
@@ -109,3 +83,4 @@ class PinataClient:
             timestamp=str(data.get("created_at", "")),
             raw_response=data,
         )
+

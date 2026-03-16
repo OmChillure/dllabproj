@@ -222,16 +222,26 @@ def draw_car_detections(
                     (0, 0, 255),
                     2,
                 )
-                if alert_sink is not None:
-                    import time as _time
-                    import math as _math
-                    alert_sink.append({
-                        "occurred_at":   int(_time.time()),
-                        "vehicle_class": class_name,
-                        "distance_m":    distance_m,
-                        "ttc_s":         ttc_s if _math.isfinite(ttc_s) else 0.0,
-                        "severity_score":  score,
-                        "severity_label":  severity,
-                    })
+
+            # Record clip for ANY severity as long as vehicle is within range.
+            # HIGH/CRITICAL require the full should_alert gate (streak + finite TTC).
+            # LOW/MEDIUM fire on distance alone — they may not be approaching yet.
+            import time as _time
+            import math as _math
+            _record = False
+            if severity in ("HIGH", "CRITICAL"):
+                _record = should_alert
+            elif severity in ("LOW", "MEDIUM"):
+                _record = distance_m < near_miss_monitor.distance_alert_threshold_m
+
+            if _record and alert_sink is not None:
+                alert_sink.append({
+                    "occurred_at":    int(_time.time()),
+                    "vehicle_class":  class_name,
+                    "distance_m":     distance_m,
+                    "ttc_s":          ttc_s if _math.isfinite(ttc_s) else 0.0,
+                    "severity_score": score,
+                    "severity_label": severity,
+                })
 
     return frame

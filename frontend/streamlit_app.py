@@ -229,14 +229,14 @@ with col_right:
         '<div class="stat-label" style="margin-bottom:0.8rem;">📁 &nbsp;IPFS CLIPS</div>',
         unsafe_allow_html=True,
     )
-    clips_placeholder  = st.empty()
+    clips_placeholder = st.empty()
     folder_placeholder = st.empty()
 
     def render_clips(clips: list, folder: str | None = None):
         if folder:
             folder_placeholder.markdown(
                 f'<div class="incident-cid" style="color:#555570;margin-bottom:0.6rem;">'
-                f'📂 {folder}</div>',
+                f"📂 {folder}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -252,59 +252,57 @@ with col_right:
 
         SEV_COLORS = {
             "CRITICAL": "#ff2244",
-            "HIGH":     "#ff8800",
-            "MEDIUM":   "#ffcc00",
-            "LOW":      "#44ff88",
+            "HIGH": "#ff8800",
+            "MEDIUM": "#ffcc00",
+            "LOW": "#44ff88",
         }
 
-        html = ""
-        for clip in reversed(clips):
-            kv       = clip.get("keyvalues") or {}
-            sev      = (kv.get("severity") or "LOW").upper()
-            color    = SEV_COLORS.get(sev, "#555570")
-            cid      = clip.get("cid", "")
-            name     = clip.get("name", cid[:12])
-            url      = clip.get("ipfs_url", f"https://gateway.pinata.cloud/ipfs/{cid}")
-            ts_raw   = clip.get("created_at", "")
-            vehicle  = kv.get("vehicle", "")
-            occurred = kv.get("occurred_at", "")
+        # Build grid rows of 3
+        rows = [clips[i:i+3] for i in range(0, len(clips), 3)]
+        html = '<div style="display:flex;flex-direction:column;gap:0.5rem;">'
+        for row in rows:
+            html += '<div style="display:flex;gap:0.5rem;">'
+            for clip in row:
+                sev     = (clip.get("severity") or "LOW").upper()
+                color   = SEV_COLORS.get(sev, "#555570")
+                cid     = clip.get("cid", "")
+                url     = clip.get("ipfs_url", f"https://gateway.pinata.cloud/ipfs/{cid}")
+                vehicle = clip.get("vehicle", "Vehicle").capitalize()
+                ts_raw  = clip.get("occurred_at", "")
+                try:
+                    from datetime import datetime as _dt
+                    ts = _dt.fromisoformat(ts_raw.replace("Z", "+00:00")).strftime("%H:%M:%S")
+                except Exception:
+                    ts = ts_raw[:8] if ts_raw else "—"
 
-            # Format timestamp
-            try:
-                from datetime import datetime as _dt
-                ts = _dt.fromisoformat(ts_raw.replace("Z", "+00:00")).strftime("%H:%M:%S")
-            except Exception:
-                ts = ts_raw[:19] if ts_raw else "—"
-
-            html += f"""
-            <div style="background:#0d0d18;border:1px solid #1e1e30;border-radius:10px;
-                        padding:0.8rem 1rem;margin-bottom:0.55rem;
-                        border-left:3px solid {color};">
-                <div style="display:flex;justify-content:space-between;align-items:center;
-                             margin-bottom:0.35rem;">
-                    <span style="font-family:'Syne',sans-serif;font-weight:700;
-                                 font-size:0.82rem;color:#e8e8f0;">
-                        {vehicle.capitalize() or "Vehicle"}
-                    </span>
-                    <span style="font-family:'Space Mono',monospace;font-size:0.62rem;
-                                 font-weight:700;padding:0.12rem 0.5rem;border-radius:20px;
-                                 background:{color}22;color:{color};border:1px solid {color}40;">
-                        {sev}
-                    </span>
+                html += f"""
+                <a href="{url}" target="_blank" style="text-decoration:none;flex:1;">
+                <div style="background:#0d0d18;border:1px solid #1e1e30;border-radius:10px;
+                            padding:0.7rem;aspect-ratio:1/1;display:flex;flex-direction:column;
+                            justify-content:space-between;border-top:3px solid {color};
+                            cursor:pointer;">
+                    <div>
+                        <div style="font-family:'Space Mono',monospace;font-size:0.58rem;
+                                    font-weight:700;padding:0.1rem 0.45rem;border-radius:20px;
+                                    background:{color}22;color:{color};border:1px solid {color}40;
+                                    display:inline-block;margin-bottom:0.4rem;">{sev}</div>
+                        <div style="font-family:'Syne',sans-serif;font-weight:700;
+                                    font-size:0.78rem;color:#e8e8f0;">{vehicle}</div>
+                    </div>
+                    <div>
+                        <div style="font-family:'Space Mono',monospace;font-size:0.58rem;
+                                    color:#555570;margin-bottom:0.3rem;">🕐 {ts}</div>
+                        <div style="font-family:'Space Mono',monospace;font-size:0.55rem;
+                                    color:#00cfff;word-break:break-all;">🎬 {cid[:14]}…</div>
+                    </div>
                 </div>
-                <div style="font-family:'Space Mono',monospace;font-size:0.62rem;
-                             color:#555570;margin-bottom:0.35rem;">
-                    {ts}
-                </div>
-                <div style="font-family:'Space Mono',monospace;font-size:0.6rem;
-                             color:#333350;word-break:break-all;">
-                    🎬 <a href="{url}" target="_blank"
-                          style="color:#00cfff;text-decoration:none;">
-                        {cid[:20]}…
-                    </a>
-                </div>
-            </div>
-            """
+                </a>
+                """
+            # fill empty cells in last row
+            for _ in range(3 - len(row)):
+                html += '<div style="flex:1;"></div>'
+            html += '</div>'
+        html += '</div>'
         clips_placeholder.markdown(html, unsafe_allow_html=True)
 
     render_clips(st.session_state.get("clips", []), st.session_state.get("folder"))
@@ -327,13 +325,15 @@ if start_btn and uploaded_file is not None:
                 timeout=60,
             )
             res.raise_for_status()
-            data     = res.json()
+            data = res.json()
             video_id = data["video_id"]
             st.session_state.video_id = video_id
-            st.session_state.folder   = data.get("folder") or f"{data.get('camera_id','cam')}/{video_id}"
+            st.session_state.folder = (
+                data.get("folder") or f"{data.get('camera_id', 'cam')}/{video_id}"
+            )
             requests.post(f"{FLASK_URL}/start/{video_id}", timeout=10)
             st.session_state.status = "running"
-            st.session_state.clips  = []
+            st.session_state.clips = []
             st.rerun()
         except Exception as e:
             st.session_state.status = "failed"
@@ -352,7 +352,7 @@ if stop_btn and "video_id" in st.session_state:
 # ── Live streaming loop ───────────────────────────────────────────────────────
 
 if st.session_state.get("status") == "running" and "video_id" in st.session_state:
-    video_id   = st.session_state.video_id
+    video_id = st.session_state.video_id
     stream_url = f"{FLASK_URL}/stream/{video_id}"
 
     with col_mid:
@@ -378,16 +378,15 @@ if st.session_state.get("status") == "running" and "video_id" in st.session_stat
     except Exception:
         pass
 
-    # Poll Pinata group for new clips every ~30 s
-    # Streamlit reruns every 3 s; we fetch clips only on every 10th rerun ≈ 30 s
+    # Poll for new clips every ~9 s (every 3rd rerun × 3 s sleep)
     poll_counter = st.session_state.get("poll_counter", 0) + 1
     st.session_state.poll_counter = poll_counter
 
-    if poll_counter % 10 == 1:   # fetch on 1st run then every 30 s
+    if poll_counter % 3 == 1:  # fetch on 1st run then every ~9 s
         try:
             clip_res = requests.get(f"{FLASK_URL}/clips/{video_id}", timeout=10)
-            payload  = clip_res.json()
-            st.session_state.clips  = payload.get("clips", [])
+            payload = clip_res.json()
+            st.session_state.clips = payload.get("clips", [])
             st.session_state.folder = payload.get("folder", st.session_state.folder)
         except Exception:
             pass
@@ -396,4 +395,3 @@ if st.session_state.get("status") == "running" and "video_id" in st.session_stat
 
     time.sleep(3)
     st.rerun()
-

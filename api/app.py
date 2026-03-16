@@ -18,7 +18,7 @@ from ultralytics import YOLO
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from detection import NearMissMonitor, draw_car_detections
 from lane import detect_lanes
-from pinata_client import PinataClient, PINATA_GATEWAY
+from pinata_client import PinataClient, PUBLIC_GATEWAY
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "..", "uploads")
 CLIP_FOLDER   = os.path.join(os.path.dirname(__file__), "..", "clips")
@@ -47,11 +47,19 @@ CAMERA_ID  = os.getenv("CAMERA_ID", "cam-01")
 # Thread pool for parallel IPFS uploads (up to 4 concurrent)
 _upload_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="ipfs-upload")
 
-logging.basicConfig(level=logging.INFO)
+# ── Logging: only show Pinata/Solana + Flask request logs ────────────────────
+logging.basicConfig(level=logging.WARNING)           # silence everything by default
+logging.getLogger("__main__").setLevel(logging.DEBUG)        # app.py logs (Pinata/Solana)
+logging.getLogger("solana_client").setLevel(logging.DEBUG)   # solana_client.py logs
+logging.getLogger("pinata_client").setLevel(logging.DEBUG)   # pinata_client.py logs (if any)
+logging.getLogger("werkzeug").setLevel(logging.INFO)         # keep Flask HTTP request lines
+logging.getLogger("detection").setLevel(logging.WARNING)     # silence Track/TTC spam
+logging.getLogger("ultralytics").setLevel(logging.WARNING)   # silence YOLO output
 LOGGER = logging.getLogger(__name__)
 
 app   = Flask(__name__)
 jobs: dict[str, dict] = {}
+job_clips: dict[str, list] = {}   # video_id → list of uploaded clip dicts
 recorded_incidents: list = []
 model = None
 model_lock = threading.Lock()
@@ -65,57 +73,61 @@ def get_model():
     return model
 
 
-def _make_pinata_group(video_id: str) -> str | None:
-    """Create a Pinata group named '<camera_id>/<video_id>' and return its ID."""
-    if not PINATA_JWT:
-        return None
+def _upload_and_record(clip_path: str, incident_meta: dict, video_id: str) -> None:
+    """Upload clip to IPFS; submit to Solana for HIGH/CRITICAL; track locally."""
     try:
-        pinata     = PinataClient(jwt_token=PINATA_JWT)
-        group_name = f"{CAMERA_ID}/{video_id}"
-        group_id   = pinata.create_group(group_name)
-        LOGGER.info("Pinata group created: %s  id=%s", group_name, group_id)
-        return group_id
-    except Exception as e:
-        LOGGER.error("Failed to create Pinata group: %s", e)
-        return None
-
-
-def _upload_and_record(clip_path: str, incident_meta: dict, group_id: str | None) -> None:
-    """Upload clip to IPFS (in the job's Pinata group); submit to Solana for HIGH/CRITICAL."""
-    try:
-        severity          = incident_meta.get("severity_label", "").upper()
+        severity           = incident_meta.get("severity_label", "").upper()
         onchain_severities = {"HIGH", "CRITICAL"}
         clip_cid = ""
         tx       = ""
         clip_id  = incident_meta.get("clip_id", uuid.uuid4().hex)
 
+        LOGGER.info("━━━ CLIP READY  clip_id=%s  severity=%s  path=%s",
+                    clip_id, severity, clip_path)
+
         if not PINATA_JWT:
-            LOGGER.warning("PINATA_JWT not set — skipping IPFS upload.")
+            LOGGER.warning("⚠ PINATA_JWT not set — skipping IPFS upload.")
         else:
+            LOGGER.info("⬆ PINATA UPLOAD START  name=%s/%s/%s", CAMERA_ID, video_id, clip_id)
             pinata = PinataClient(jwt_token=PINATA_JWT)
             result = pinata.upload_clip(
                 clip_path,
-                name=f"incident_{clip_id}",
-                group_id=group_id,          # ← placed inside camid/videoid folder
+                name=f"{CAMERA_ID}/{video_id}/{clip_id}",
                 keyvalues={
-                    "clip_id":    clip_id,
-                    "camera_id":  CAMERA_ID,
-                    "severity":   severity,
-                    "vehicle":    incident_meta["vehicle_class"],
+                    "camera_id":   CAMERA_ID,
+                    "video_id":    video_id,
+                    "clip_id":     clip_id,
+                    "severity":    severity,
+                    "vehicle":     incident_meta["vehicle_class"],
                     "occurred_at": str(incident_meta["occurred_at"]),
                 },
             )
             clip_cid = result.ipfs_cid
-            LOGGER.info(
-                "Clip uploaded to IPFS group=%s  cid=%s  severity=%s",
-                group_id, clip_cid, severity,
-            )
+            ipfs_url = f"{PUBLIC_GATEWAY}/{clip_cid}"
+            LOGGER.info("✅ PINATA UPLOAD OK  cid=%s  size=%s bytes  severity=%s",
+                        clip_cid, result.size_bytes, severity)
+            LOGGER.info("🔗 IPFS URL: %s", ipfs_url)
+
+            # Track locally so /clips endpoint responds immediately without querying Pinata
+            job_clips.setdefault(video_id, []).append({
+                "clip_id":     clip_id,
+                "cid":         clip_cid,
+                "ipfs_url":    ipfs_url,
+                "severity":    severity,
+                "occurred_at": str(incident_meta.get("occurred_at", "")),
+                "vehicle":     incident_meta.get("vehicle_class", ""),
+            })
 
             if severity in onchain_severities:
+                LOGGER.info("⛓  SOLANA SUBMIT START  cid=%s  severity=%s", clip_cid, severity)
                 tx = submit_to_solana(incident_meta, clip_cid) or ""
-                LOGGER.info("Submitted to Solana: %s", tx)
+                if tx:
+                    LOGGER.info("✅ SOLANA TX OK  sig=%s", tx)
+                    LOGGER.info("🔗 Explorer: https://explorer.solana.com/tx/%s?cluster=devnet", tx)
+                else:
+                    LOGGER.error("✗  SOLANA TX FAILED — no signature returned")
             else:
-                LOGGER.info("Severity %s — IPFS only, not on-chain.", severity)
+                LOGGER.info("📦 Severity=%s — IPFS only, not on-chain.", severity)
 
         recorded_incidents.append(
             {
@@ -131,9 +143,11 @@ def _upload_and_record(clip_path: str, incident_meta: dict, group_id: str | None
                 "tx":             tx,
             }
         )
+        LOGGER.info("📝 Incident recorded  clip_id=%s  cid=%s  tx=%s", clip_id, clip_cid, tx or "—")
 
     except Exception as e:
-        LOGGER.error("Upload/record failed: %s", e)
+        LOGGER.error("✗ Upload/record FAILED  clip_id=%s  error=%s",
+                     incident_meta.get("clip_id", "?"), e, exc_info=True)
     finally:
         try:
             os.remove(clip_path)
@@ -158,8 +172,6 @@ def generate_frames(video_path: str, job_id: str):
     if not cap.isOpened():
         jobs[job_id]["status"] = "failed"
         return
-
-    group_id = jobs[job_id].get("group_id")          # Pinata group for this cam/video
 
     yolo = get_model()
     frame_budget = 1.0 / TARGET_FPS
@@ -229,7 +241,7 @@ def generate_frames(video_path: str, job_id: str):
                 _save_clip(clip_frames, TARGET_FPS, clip_path)
                 # Fire-and-forget upload in the thread pool — does NOT block the stream
                 _upload_executor.submit(
-                    _upload_and_record, clip_path, active_incident, group_id
+                    _upload_and_record, clip_path, active_incident, job_id
                 )
                 post_roll_frames = []
                 active_incident  = None
@@ -275,27 +287,16 @@ def upload():
     save_path = os.path.join(UPLOAD_FOLDER, f"{video_id}{ext}")
     f.save(save_path)
 
-    # Create Pinata group: <camera_id>/<video_id> — done in background so upload is instant
-    group_id = None
-    if PINATA_JWT:
-        try:
-            pinata   = PinataClient(jwt_token=PINATA_JWT)
-            group_id = pinata.create_group(f"{CAMERA_ID}/{video_id}")
-            LOGGER.info("Pinata group ready: %s/%s  id=%s", CAMERA_ID, video_id, group_id)
-        except Exception as e:
-            LOGGER.error("Could not create Pinata group: %s", e)
-
     jobs[video_id] = {
         "status":    "queued",
         "path":      save_path,
         "stop":      False,
         "camera_id": CAMERA_ID,
-        "group_id":  group_id,
     }
     return jsonify({
         "video_id":  video_id,
         "camera_id": CAMERA_ID,
-        "group_id":  group_id,
+        "folder":    f"{CAMERA_ID}/{video_id}",
         "message":   "upload successful",
     })
 
@@ -340,37 +341,16 @@ def status(video_id):
 
 @app.route("/clips/<video_id>")
 def get_clips(video_id):
-    """List all clips stored in the Pinata group for this video."""
-    job = jobs.get(video_id)
-    if not job:
+    """Return all clips uploaded for this video (tracked locally after upload)."""
+    if video_id not in jobs:
         return jsonify({"error": "Unknown video_id"}), 404
 
-    group_id = job.get("group_id")
-    if not group_id or not PINATA_JWT:
-        return jsonify({"clips": [], "group_id": None, "folder": None})
-
-    try:
-        pinata = PinataClient(jwt_token=PINATA_JWT)
-        files  = pinata.list_group_files(group_id)
-        clips  = [
-            {
-                "name":       f.get("name", ""),
-                "cid":        f.get("cid", ""),
-                "ipfs_url":   f"{PINATA_GATEWAY}/{f['cid']}",
-                "size":       f.get("size", 0),
-                "created_at": f.get("created_at", ""),
-                "keyvalues":  f.get("keyvalues", {}),
-            }
-            for f in files
-        ]
-        return jsonify({
-            "folder":   f"{CAMERA_ID}/{video_id}",
-            "group_id": group_id,
-            "clips":    clips,
-        })
-    except Exception as e:
-        LOGGER.error("Failed to list Pinata group files: %s", e)
-        return jsonify({"error": str(e)}), 500
+    clips = job_clips.get(video_id, [])
+    LOGGER.info("📂 /clips/%s  returning %d clip(s)", video_id, len(clips))
+    return jsonify({
+        "folder": f"{CAMERA_ID}/{video_id}",
+        "clips":  clips,
+    })
 
 
 @app.route("/incidents")

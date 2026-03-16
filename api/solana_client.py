@@ -15,11 +15,12 @@ from solders.system_program import ID as SYS_PROGRAM_ID
 from anchorpy import Program, Provider, Wallet, Context, Idl
 from anchorpy.provider import DEFAULT_OPTIONS
 from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Confirmed
 
 LOGGER = logging.getLogger(__name__)
 
-SOLANA_RPC_URL      = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
-PROGRAM_ID          = os.getenv("PROGRAM_ID", "")
+SOLANA_RPC_URL       = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+PROGRAM_ID           = os.getenv("PROGRAM_ID", "")
 REPORTER_PRIVATE_KEY = os.getenv("REPORTER_PRIVATE_KEY", "")  # base58 or json array
 
 
@@ -27,7 +28,7 @@ def _load_keypair() -> Keypair:
     key = REPORTER_PRIVATE_KEY.strip()
     if key.startswith("["):
         return Keypair.from_bytes(bytes(json.loads(key)))
-    return Keypair.from_base58_string(key)  # ← handles your format
+    return Keypair.from_base58_string(key)
 
 
 def _camera_id_hash(camera_id: str) -> list[int]:
@@ -41,7 +42,8 @@ async def _submit_async(incident_meta: dict, clip_cid: str) -> str | None:
 
     keypair  = _load_keypair()
     wallet   = Wallet(keypair)
-    client   = AsyncClient(SOLANA_RPC_URL)
+    # Use Confirmed commitment so registry reads always reflect the latest confirmed TX
+    client   = AsyncClient(SOLANA_RPC_URL, commitment=Confirmed)
     provider = Provider(client, wallet, DEFAULT_OPTIONS)
 
     idl_path = Path(__file__).parent / "idl.json"
@@ -92,6 +94,10 @@ async def _submit_async(incident_meta: dict, clip_cid: str) -> str | None:
         ),
     )
 
+    # Wait for confirmation before releasing the lock so the next submission
+    # reads the already-incremented next_incident_id from the chain.
+    await client.confirm_transaction(tx, commitment=Confirmed)
+
     LOGGER.info("Incident recorded on Solana: %s", tx)
     await client.close()
     return str(tx)
@@ -100,7 +106,11 @@ async def _submit_async(incident_meta: dict, clip_cid: str) -> str | None:
 def submit_to_solana(incident_meta: dict, clip_cid: str) -> str | None:
     with _solana_lock:          # one submission at a time — prevents PDA seed collision
         try:
-            return asyncio.run(_submit_async(incident_meta, clip_cid))
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(_submit_async(incident_meta, clip_cid))
+            finally:
+                loop.close()
         except Exception as e:
             LOGGER.error("Solana submission failed: %s", e)
             return None
