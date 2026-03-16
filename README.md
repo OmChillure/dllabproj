@@ -20,7 +20,7 @@ Build a UI where:
 - Backend API: `Flask`
 - Inference/processing: existing OpenCV + Ultralytics YOLO code in `src/`
 
-## Recommended Folder Structure
+## Folder Structure
 Create these files:
 
 ```text

@@ -71,13 +71,11 @@ def process_video(
 
         resized = cv2.resize(frame, (frame_width, frame_height))
 
-        # Run YOLO first so we have vehicle boxes for lane clipping
         results = model(resized, verbose=False)
         vehicle_boxes = _extract_vehicle_boxes(
             results, model.names, car_confidence_threshold, target_classes
         )
 
-        # Pass vehicle boxes so lane polygon stops at the nearest vehicle
         lane_frame = detect_lanes(resized, vehicle_boxes=vehicle_boxes)
 
         output = draw_car_detections(

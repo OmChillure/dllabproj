@@ -9,7 +9,7 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_PATH = str(BASE_DIR / "weights" / "yolov8n.pt")
+MODEL_PATH = str(BASE_DIR / "weights" / "yolov8n_custom.pt")
 VIDEO_PATH = str(BASE_DIR / "video" / "video5.mp4")
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720

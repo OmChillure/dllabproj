@@ -26,7 +26,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(CLIP_FOLDER, exist_ok=True)
 
 MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "src", "weights", "yolov8n.pt"
+    os.path.dirname(__file__), "..", "src", "weights", "yolov8n_custom.pt"
 )
 FRAME_WIDTH                  = 1280
 FRAME_HEIGHT                 = 720
@@ -37,17 +37,13 @@ FOCAL_LENGTH                 = 1000.0
 KNOWN_CAR_WIDTH_M            = 2.0
 NEAR_MISS_DISTANCE_THRESHOLD_M = 30.0
 NEAR_MISS_DECREASE_STREAK    = 3
-CLIP_PRE_ROLL_FRAMES  = 150  # 5 s before alert  (150 / 30 fps = 5 s)
-CLIP_POST_ROLL_FRAMES = 150  # 5 s after  alert  → total clip ≈ 10 s
-
-# ── Config ────────────────────────────────────────────────────────────────────
+CLIP_PRE_ROLL_FRAMES  = 150  
+CLIP_POST_ROLL_FRAMES = 150  
 PINATA_JWT = os.getenv("PINATA_JWT", "")
 CAMERA_ID  = os.getenv("CAMERA_ID", "cam-01")
 
-# Thread pool for parallel IPFS uploads (up to 4 concurrent)
 _upload_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="ipfs-upload")
 
-# ── Logging: only show Pinata/Solana + Flask request logs ────────────────────
 logging.basicConfig(level=logging.WARNING)           # silence everything by default
 logging.getLogger("__main__").setLevel(logging.DEBUG)        # app.py logs (Pinata/Solana)
 logging.getLogger("solana_client").setLevel(logging.DEBUG)   # solana_client.py logs
@@ -59,7 +55,7 @@ LOGGER = logging.getLogger(__name__)
 
 app   = Flask(__name__)
 jobs: dict[str, dict] = {}
-job_clips: dict[str, list] = {}   # video_id → list of uploaded clip dicts
+job_clips: dict[str, list] = {} 
 recorded_incidents: list = []
 model = None
 model_lock = threading.Lock()
@@ -108,7 +104,6 @@ def _upload_and_record(clip_path: str, incident_meta: dict, video_id: str) -> No
                         clip_cid, result.size_bytes, severity)
             LOGGER.info("🔗 IPFS URL: %s", ipfs_url)
 
-            # Track locally so /clips endpoint responds immediately without querying Pinata
             job_clips.setdefault(video_id, []).append({
                 "clip_id":     clip_id,
                 "cid":         clip_cid,
