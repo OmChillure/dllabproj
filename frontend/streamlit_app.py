@@ -1,9 +1,14 @@
+import os
 import time
 
 import requests
 import streamlit as st
 
-FLASK_URL = "http://localhost:5000"
+FLASK_URL = (
+    os.getenv("FLASK_URL")
+    or os.getenv("BACKEND_URL")
+    or "http://localhost:5000"
+).rstrip("/")
 
 st.set_page_config(
     page_title="RoadSense — Live Detection",

@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import uuid
 
 from dotenv import load_dotenv
@@ -20,8 +21,11 @@ from detection import NearMissMonitor, draw_car_detections
 from lane import detect_lanes
 from pinata_client import PinataClient, PUBLIC_GATEWAY
 
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "..", "uploads")
-CLIP_FOLDER   = os.path.join(os.path.dirname(__file__), "..", "clips")
+RUNTIME_DATA_DIR = os.getenv(
+    "RUNTIME_DATA_DIR", os.path.join(tempfile.gettempdir(), "roadsense")
+)
+UPLOAD_FOLDER = os.path.join(RUNTIME_DATA_DIR, "uploads")
+CLIP_FOLDER   = os.path.join(RUNTIME_DATA_DIR, "clips")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(CLIP_FOLDER, exist_ok=True)
 
@@ -354,4 +358,9 @@ def get_incidents():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "5000")),
+        debug=False,
+        threaded=True,
+    )
