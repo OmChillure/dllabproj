@@ -32,9 +32,9 @@ os.makedirs(CLIP_FOLDER, exist_ok=True)
 MODEL_PATH = os.path.join(
     os.path.dirname(__file__), "..", "src", "weights", "yolov8n_custom.pt"
 )
-FRAME_WIDTH                  = 1280
-FRAME_HEIGHT                 = 720
-TARGET_FPS                   = 30
+FRAME_WIDTH                  = 640
+FRAME_HEIGHT                 = 360
+TARGET_FPS                   = 15
 CAR_CONFIDENCE_THRESHOLD     = 0.5
 TARGET_VEHICLE_CLASSES       = {"car", "truck", "bus"}
 FOCAL_LENGTH                 = 1000.0
