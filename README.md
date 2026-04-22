@@ -112,3 +112,14 @@ streamlit run frontend/streamlit_app.py
 
 **Frontend** (`dlfrontend/.env` locally, Streamlit Secrets in prod):
 - `BACKEND_URL`
+
+## Contributors
+| Name | Roll No |
+|------|---------|
+| Om Chillure | A3-45 |
+| Adnan Dalal | A3-42 |
+| Sakshi Mude | A3-48 |
+
+**Guide:** Prof. V. R. Gupta  
+**Course:** ECSP6003-1 Deep Learning Lab, Sem VI B.Tech ECS  
+**College:** RCOEM, Nagpur
