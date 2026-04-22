@@ -3,8 +3,11 @@ import time
 
 import requests
 import streamlit as st
+from dotenv import load_dotenv
 
-BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:5000").rstrip("/")
+load_dotenv()
+
+BACKEND_URL = "https://omchillure-dlproj.hf.space"
 
 st.set_page_config(
     page_title="RoadSense — Live Detection",
@@ -315,7 +318,7 @@ if start_btn and uploaded_file is not None:
     with st.spinner("Uploading video..."):
         try:
             res = requests.post(
-                f"{FLASK_URL}/upload",
+                f"{BACKEND_URL}/upload",
                 files={
                     "file": (
                         uploaded_file.name,
@@ -332,7 +335,7 @@ if start_btn and uploaded_file is not None:
             st.session_state.folder = (
                 data.get("folder") or f"{data.get('camera_id', 'cam')}/{video_id}"
             )
-            requests.post(f"{FLASK_URL}/start/{video_id}", timeout=10)
+            requests.post(f"{BACKEND_URL}/start/{video_id}", timeout=10)
             st.session_state.status = "running"
             st.session_state.clips = []
             st.rerun()
@@ -342,7 +345,7 @@ if start_btn and uploaded_file is not None:
 
 if stop_btn and "video_id" in st.session_state:
     try:
-        requests.post(f"{FLASK_URL}/stop/{st.session_state.video_id}", timeout=5)
+        requests.post(f"{BACKEND_URL}/stop/{st.session_state.video_id}", timeout=5)
     except Exception:
         pass
     st.session_state.status = "idle"
@@ -354,7 +357,7 @@ if stop_btn and "video_id" in st.session_state:
 
 if st.session_state.get("status") == "running" and "video_id" in st.session_state:
     video_id = st.session_state.video_id
-    stream_url = f"{FLASK_URL}/stream/{video_id}"
+    stream_url = f"{BACKEND_URL}/stream/{video_id}"
 
     with col_mid:
         stream_placeholder.markdown(
@@ -371,7 +374,7 @@ if st.session_state.get("status") == "running" and "video_id" in st.session_stat
 
     # Check job completion
     try:
-        status_res = requests.get(f"{FLASK_URL}/status/{video_id}", timeout=3)
+        status_res = requests.get(f"{BACKEND_URL}/status/{video_id}", timeout=3)
         job_status = status_res.json().get("status", "running")
         if job_status in ("completed", "failed"):
             st.session_state.status = job_status
@@ -385,7 +388,7 @@ if st.session_state.get("status") == "running" and "video_id" in st.session_stat
 
     if poll_counter % 3 == 1:  # fetch on 1st run then every ~9 s
         try:
-            clip_res = requests.get(f"{FLASK_URL}/clips/{video_id}", timeout=10)
+            clip_res = requests.get(f"{BACKEND_URL}/clips/{video_id}", timeout=10)
             payload = clip_res.json()
             st.session_state.clips = payload.get("clips", [])
             st.session_state.folder = payload.get("folder", st.session_state.folder)
