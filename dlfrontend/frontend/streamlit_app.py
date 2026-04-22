@@ -11,7 +11,6 @@ BACKEND_URL = "https://omchillure-dlproj.hf.space"
 
 st.set_page_config(
     page_title="RoadSense — Live Detection",
-    page_icon="🚗",
     layout="wide",
 )
 
